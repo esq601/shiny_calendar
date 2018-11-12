@@ -1,24 +1,17 @@
 library(shiny)
 library(dplyr)
-#library(ggplot2)
 library(shinydashboard)
 library(tidyr)
-#library(rsconnect)
 library(readr)
 library(lubridate)
 library(directlabels)
 library(timevis)
 library(stringr)
-#library(DT)
-#library(ggthemes)
-#library(plotly)
 library(tidyselect)
 library(janitor)
 library(htmltools)
 library(htmlwidgets)
 library(DT)
-#library(shinyalert)
-#library(vistime)
 
 pw <- "calendarUpdate"
 
@@ -65,14 +58,14 @@ ui <-  dashboardPage(skin="black",
                                      column(actionButton("backdate","Prev. Month"),width = 1),
                                      column(actionButton("resetdate","Reset Dates"),width=1)
                                      ),
-                            fluidRow(DTOutput("table2"),textOutput("datetest"))
+                            fluidRow(DTOutput("table2"))
                             )
                  )
                   
                   #div(style= styles,timevisOutput("make_timeline"))
                 )
   )
-#?div
+?fileInput
 #save(sgs1,file="caldata.rda")
 server <- function(input, output, session) {
 
@@ -131,6 +124,7 @@ server <- function(input, output, session) {
   observeEvent(input$file1,{
     tryCatch(
       {
+        sgs2 <- sgs1
         sgs1 <- read_csv(input$file1$datapath,
                          col_types = cols(`End Date` = col_datetime(format = "%m/%d/%Y %H:%M"),
                                           `Start Date` = col_datetime(format = "%m/%d/%Y %H:%M"),
@@ -150,14 +144,15 @@ server <- function(input, output, session) {
                                         "Executive Options","Exec Legend","SR LDR Coverage","Comments","Location","Summary Event","ID")))==13){
         showModal(modalDialog(
           title="Complete!",
-          "File Upload Successful!"
+          "File Upload Successful!  Refresh your browser to see updates."
         ))
         save(sgs1,file="calendar.rda")
+        save(sgs2,file="backup.rda")
         load(file="calendar.rda")
       } else {
         showModal(modalDialog(
           title="Error",
-          "The file uploaded did not contain the correct fields.  Please ensure your .csv file contains the following items:
+          "The file uploaded did not contain the correct fields.  Please ensure your .csv formatted file contains the following items:
         Event, Sub-Event, Unit, Start Date, End Date, Calendar, Executive Options, Exec Legend, SR LDR Coverage, Comments, Location, Summary Event, ID.  
           Columns must be in the order listed above."
         ))
@@ -165,7 +160,7 @@ server <- function(input, output, session) {
     } else {
       showModal(modalDialog(
         title="Password",
-        "Please input the password when uploading file"
+        "Incorrect password!"
       ))
     }
     #print(head(sgs1))  #save(sgs1,file="calendar.rda")
@@ -195,6 +190,11 @@ server <- function(input, output, session) {
       calendar %in% "Executive Calendar" & !is.na(exec) == TRUE ~ exec,
       TRUE ~ "N/A"
     ))) %>%
+    mutate(title=case_when(
+      difftime(end_date,start_date)  <= 86400 ~ paste(strftime(start_date,"%H%M"),strftime(end_date,"%H%M"),sep=" - "),
+      difftime(end_date,start_date)  > 86400 ~ paste(strftime(start_date,"%d %b %y"),strftime(end_date,"%d %b %y"),sep=" - "),
+      TRUE ~ "Invalid Format")
+      ) %>%
     mutate(group=as.numeric(group_name)) %>%
     mutate(style = case_when(
       group == 4 ~ "background-color: CornflowerBlue;
@@ -245,7 +245,7 @@ server <- function(input, output, session) {
       TRUE ~ style
     )) %>%
     distinct()
-  #str(sgs1)
+#str(sgs2)
   sgs_table <- sgs1 %>%
     mutate(Events = paste3(Event,`Sub-Event`,sep=": ")) %>%
     mutate(col1 = paste(as.character(strftime(`Start Date`,"%d %b %y")))) %>%
@@ -263,12 +263,12 @@ server <- function(input, output, session) {
 
     sgs3 <- sgs2 %>%
       dplyr::filter(calendar %in% input$cal_type) %>%
-      dplyr::select(event,sub_event,start_date,calendar,end_date,group_name,group,style,comments,id) %>%
+      dplyr::select(event,sub_event,start_date,calendar,end_date,group_name,group,style,comments,id,title) %>%
       distinct()
-    #print(head(sgs3))
+
     sgs3
   })
-    ?grepl
+?grepl
     table_data <- reactive({
       
       table1 <- sgs_table %>%
@@ -282,7 +282,7 @@ server <- function(input, output, session) {
         table2
       } else {
         table2 <- table1 %>%
-          filter(Unit %in% input$unitSelectCall)
+          filter(Unit %in% input$unitSelectCall | grepl(paste(input$unitSelectCall,collapse="|"),`SR LDRs`) | grepl(paste(input$unitSelectCall,collapse="|"),Events))
         table2
       }
       
@@ -332,10 +332,10 @@ server <- function(input, output, session) {
       start=cal_data_filter()$start_date,
       end=cal_data_filter()$end_date,
       group=cal_data_filter()$group,
-      title=iconv(cal_data_filter()$comments,sub = ""),
+      #title=iconv(cal_data_filter()$comments,sub = ""),
       #location=iconv(cal_data_filter()$location,sub = ""),
       subgroup=cal_data_filter()$id,
-      #title=cal_data_filter()$title,
+      title=cal_data_filter()$title,
       #className=cal_data_filter()$className,
       #type=cal_data_filter()$type,
       style=cal_data_filter()$style,stringsAsFactors = FALSE)
@@ -348,7 +348,6 @@ server <- function(input, output, session) {
     group_cal <- group_cal %>%
       distinct(id,.keep_all=TRUE)
 
-    #print(group_cal)
     t2 <- timevis(timedata, groups=group_cal, showZoom=TRUE,options=list(
       start=as.POSIXct(cut(Sys.Date(), "month")),
       end=as.POSIXct(cut(Sys.Date(), "month")) + months(4),
@@ -361,7 +360,6 @@ server <- function(input, output, session) {
       multiselect = "true",
       width="160%"
     ))
-    
     
     t2
   })
@@ -405,17 +403,13 @@ server <- function(input, output, session) {
     req(input$make_timeline_selected)
     req(input$make_timeline_data)
     
-    
-    
     df1 <- input$make_timeline_data %>%
       filter(id %in% c(input$make_timeline_selected)) %>%
       left_join(sgs1,by = c("subgroup"="ID")) %>%
       select("Event","Sub-Event","Unit","Start Date","End Date","Comments","Location")
     
     df1$`Start Date` <- as.POSIXct(df1$`Start Date`,format="%d/%m/%Y %H:%M")
-      #select(content,start,end,title)
 
-    #df1$start <- mdy_hm(df1$start)
     df1
   })
 
@@ -424,14 +418,15 @@ server <- function(input, output, session) {
     datatable(selected_item(),filter = "top") %>%
       formatDate(c(4,5),method = "toLocaleString")
   )
-  
-  
+
   output$table2 <- renderDT(
     datatable(table_data(),extensions = 'Buttons',colnames = c("Date"=2,"End/Times"=3), options = list(
                 columnDefs = list(list(visible=FALSE, targets=c(7:10))
                                   ),
                 dom = 'Blrtip',
                 ordering = F,
+                pageLength = 25,
+                lengthMenu = c(10,25,100,500),
                 buttons = c('copy', 'excel', 'pdf'))
     ) %>%
       formatStyle(
@@ -448,14 +443,7 @@ server <- function(input, output, session) {
       )
   )
 
-  Dates <- reactiveValues()
-  observe({
-    Dates$SelectedDates <- c(as.character(format(floor_date(input$dateslide[1],unit = "month"),format = "%d/%m/%Y")),as.character(format(ceiling_date(input$dateslide[2],unit = "month"),format = "%d/%m/%Y")))
-  })
-  
-  output$datetest <- renderText({
-    Dates$SelectedDates
-  })
+
 }
 
 shinyApp(ui = ui, server = server)
